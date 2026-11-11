@@ -1,23 +1,47 @@
 name: photoframe build
 
+# Builds the patched xtool AppImage for the photo-frame NAS signer (x86_64 Linux only) and publishes it
+# as a release on this fork. Same image and build script as upstream's release.yml, except that the
+# Ubuntu archive hostnames are resolved via DNS-over-HTTPS: GitHub runners couldn't resolve them
+# (Nov 2026), which broke the image's apt-get.
 on:
   push:
     branches: [photoframe]
 
 jobs:
-  dns-diagnostics:
+  build-linux-x86_64:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - name: Diagnostics
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Resolve Ubuntu archive hosts
         run: |
-          set +e
-          grep -h -E "^(deb|URIs)" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null | head -3
-          for n in archive.ubuntu.com azure.archive.ubuntu.com security.ubuntu.com github.com download.swift.org; do
-            echo "host $n: $(getent hosts $n | head -1)"
+          args=""
+          for host in archive.ubuntu.com security.ubuntu.com; do
+            ip=$(curl -fsS -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$host&type=A" \
+              | jq -r '[.Answer[] | select(.type == 1) | .data][0]')
+            echo "$host -> $ip"
+            args="$args --add-host $host:$ip"
           done
-          docker pull -q ubuntu:22.04 >/dev/null
-          for net in bridge host; do
-            for n in azure.archive.ubuntu.com github.com; do
-              echo "container($net) $n: $(docker run --rm --network $net ubuntu:22.04 getent hosts $n | head -1)"
-            done
-          done
+          echo "ADD_HOSTS=$args" >> "$GITHUB_ENV"
+      - name: Build image
+        run: |
+          docker buildx build $ADD_HOSTS --target dev --load -t xtool-dev .
+      - name: Build AppImage
+        run: |
+          mkdir -p .build/linux
+          docker run --rm $ADD_HOSTS \
+            -e XTOOL_VERSION=1.23.0-photoframe -e XTL_CI=1 \
+            -v "$PWD:/xtool" -v "$PWD/.build/linux:/xtool/.build" \
+            xtool-dev Linux/build.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="1.23.0-photoframe-${GITHUB_SHA::7}"
+          gh release create "$tag" Linux/packages/xtool-x86_64.AppImage \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "xtool $tag" \
+            --notes "xtool 1.23.0 plus a fix: skip re-registering devices already on the team (a free team at its device limit returns 403 otherwise; same fix as upstream PR #312). Built by GitHub Actions from $GITHUB_SHA."
