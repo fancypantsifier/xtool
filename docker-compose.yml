@@ -3,6 +3,8 @@ services:
     build:
       context: .
       target: dev
+      # GitHub runners' Docker builds can't resolve DNS on the default bridge network (Nov 2026).
+      network: host
     volumes:
       - .:/xtool
       - .build/linux:/xtool/.build
