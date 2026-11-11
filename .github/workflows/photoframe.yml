@@ -23,14 +23,16 @@ jobs:
           echo "upstream DNS: $dns"
           (sudo cat /etc/docker/daemon.json 2>/dev/null || echo '{}') | jq --argjson dns "$dns" '. + {dns: $dns}' > /tmp/daemon.json
           sudo cp /tmp/daemon.json /etc/docker/daemon.json && sudo systemctl restart docker
-          docker run --rm busybox nslookup archive.ubuntu.com
+          # Diagnostics: bridge-network containers have no working DNS on these runners; host network does.
+          docker run --rm busybox nslookup archive.ubuntu.com || echo "bridge network: DNS failed"
+          docker run --rm --network host busybox nslookup archive.ubuntu.com
       - name: Build image
         run: |
-          docker buildx build --target dev --load -t xtool-dev .
+          docker buildx build --network host --allow network.host --target dev --load -t xtool-dev .
       - name: Build AppImage
         run: |
           mkdir -p .build/linux
-          docker run --rm \
+          docker run --rm --network host \
             -e XTOOL_VERSION=1.23.0-photoframe -e XTL_CI=1 \
             -v "$PWD:/xtool" -v "$PWD/.build/linux:/xtool/.build" \
             xtool-dev Linux/build.sh
