@@ -1,8 +1,8 @@
 name: photoframe build
 
 # Builds the patched xtool AppImage for the photo-frame NAS signer (x86_64 Linux only) and publishes it
-# as a release on this fork. Same image and build script as upstream's release.yml, but built with
-# host networking because Docker builds on GitHub runners couldn't resolve DNS (Nov 2026).
+# as a release on this fork. Same image and build script as upstream's release.yml, plus a DNS
+# workaround because Docker builds on GitHub runners couldn't resolve hostnames (Nov 2026).
 on:
   push:
     branches: [photoframe]
@@ -15,13 +15,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Docker DNS workaround
+        run: |
+          # Docker's builder skips the runner's local resolver (127.0.0.53) and falls back to public DNS,
+          # which doesn't resolve here; point Docker at the runner's upstream DNS servers instead.
+          dns=$(awk '/^nameserver/ {print $2}' /run/systemd/resolve/resolv.conf | grep -v '^127\.' | jq -R . | jq -sc .)
+          echo "upstream DNS: $dns"
+          (sudo cat /etc/docker/daemon.json 2>/dev/null || echo '{}') | jq --argjson dns "$dns" '. + {dns: $dns}' > /tmp/daemon.json
+          sudo cp /tmp/daemon.json /etc/docker/daemon.json && sudo systemctl restart docker
+          docker run --rm busybox nslookup archive.ubuntu.com
       - name: Build image
         run: |
-          docker buildx build --network host --allow network.host --target dev --load -t xtool-dev .
+          docker buildx build --target dev --load -t xtool-dev .
       - name: Build AppImage
         run: |
           mkdir -p .build/linux
-          docker run --rm --network host \
+          docker run --rm \
             -e XTOOL_VERSION=1.23.0-photoframe -e XTL_CI=1 \
             -v "$PWD:/xtool" -v "$PWD/.build/linux:/xtool/.build" \
             xtool-dev Linux/build.sh
