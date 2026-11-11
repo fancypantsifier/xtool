@@ -1,0 +1,31 @@
+name: photoframe build
+
+# Builds the patched xtool AppImage for the photo-frame NAS signer (x86_64 Linux only) and publishes it
+# as a release on this fork. Same build commands as upstream's release.yml.
+on:
+  push:
+    branches: [photoframe]
+
+jobs:
+  build-linux-x86_64:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Build
+        run: |
+          docker compose run --build \
+            -e XTOOL_VERSION=1.23.0-photoframe \
+            -e XTL_CI=1 \
+            --rm xtool Linux/build.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="1.23.0-photoframe-${GITHUB_SHA::7}"
+          gh release create "$tag" Linux/packages/xtool-x86_64.AppImage \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "xtool $tag" \
+            --notes "xtool 1.23.0 plus a fix: skip re-registering devices already on the team (a free team at its device limit returns 403 otherwise). Built by GitHub Actions from $GITHUB_SHA."
