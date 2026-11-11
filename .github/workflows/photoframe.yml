@@ -1,7 +1,8 @@
 name: photoframe build
 
 # Builds the patched xtool AppImage for the photo-frame NAS signer (x86_64 Linux only) and publishes it
-# as a release on this fork. Same build commands as upstream's release.yml.
+# as a release on this fork. Same image and build script as upstream's release.yml, but built with
+# host networking because Docker builds on GitHub runners couldn't resolve DNS (Nov 2026).
 on:
   push:
     branches: [photoframe]
@@ -14,12 +15,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Build
+      - name: Build image
         run: |
-          docker compose run --build \
-            -e XTOOL_VERSION=1.23.0-photoframe \
-            -e XTL_CI=1 \
-            --rm xtool Linux/build.sh
+          docker buildx build --network host --allow network.host --target dev --load -t xtool-dev .
+      - name: Build AppImage
+        run: |
+          mkdir -p .build/linux
+          docker run --rm --network host \
+            -e XTOOL_VERSION=1.23.0-photoframe -e XTL_CI=1 \
+            -v "$PWD:/xtool" -v "$PWD/.build/linux:/xtool/.build" \
+            xtool-dev Linux/build.sh
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -28,4 +33,4 @@ jobs:
           gh release create "$tag" Linux/packages/xtool-x86_64.AppImage \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "xtool $tag" \
-            --notes "xtool 1.23.0 plus a fix: skip re-registering devices already on the team (a free team at its device limit returns 403 otherwise). Built by GitHub Actions from $GITHUB_SHA."
+            --notes "xtool 1.23.0 plus a fix: skip re-registering devices already on the team (a free team at its device limit returns 403 otherwise; same fix as upstream PR #312). Built by GitHub Actions from $GITHUB_SHA."
