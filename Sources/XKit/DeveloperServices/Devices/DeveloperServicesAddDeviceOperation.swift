@@ -10,6 +10,22 @@ public struct DeveloperServicesAddDeviceOperation: DeveloperServicesOperation {
     public func perform() async throws {
         guard let targetDevice = context.targetDevice else { return }
 
+        // Skip registration if the device is already on the team. Registering it again normally
+        // returns 409 CONFLICT (handled below), but once a team is at its device limit (e.g. 3 iPads
+        // on a free account) Apple returns 403 FORBIDDEN instead, which would fail every install.
+        let registered = try await DeveloperAPIPages {
+            try await context.developerAPIClient.devicesGetCollection().ok.body.json
+        } next: {
+            $0.links.next
+        }
+        .map(\.data)
+        .reduce(into: [], +=)
+        if registered.contains(where: {
+            $0.attributes?.udid?.caseInsensitiveCompare(targetDevice.udid) == .orderedSame
+        }) {
+            return
+        }
+
         // try to register the device
         let response = try await context.developerAPIClient.devicesCreateInstance(
             body: .json(.init(data: .init(
