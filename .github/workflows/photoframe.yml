@@ -11,13 +11,13 @@ jobs:
       - name: Diagnostics
         run: |
           set +e
-          echo "== host resolv.conf"; cat /etc/resolv.conf | grep -v '^#'
-          echo "== resolvectl"; resolvectl status 2>&1 | grep -E "DNS Server|Current|Protocols" | head
-          echo "== host lookup"; getent hosts archive.ubuntu.com
-          echo "== docker version"; docker version --format '{{.Server.Version}}'; cat /etc/docker/daemon.json
-          echo "== container bridge"; docker run --rm busybox sh -c 'cat /etc/resolv.conf; nslookup archive.ubuntu.com' 2>&1 | tail -6
-          echo "== container host-net"; docker run --rm --network host busybox sh -c 'cat /etc/resolv.conf; nslookup archive.ubuntu.com' 2>&1 | tail -6
-          echo "== container host-net, getent (glibc)"; docker run --rm --network host ubuntu:22.04 getent hosts archive.ubuntu.com
-          echo "== buildkit host-net"; printf 'FROM ubuntu:22.04\nRUN cat /etc/resolv.conf && getent hosts archive.ubuntu.com\n' > /tmp/Dockerfile.dns
-          docker buildx build --progress plain --no-cache --network host --allow network.host -f /tmp/Dockerfile.dns /tmp 2>&1 | grep -E "nameserver|ubuntu.com|ERROR|error" | head
-          echo "== buildkit default-net"; docker buildx build --progress plain --no-cache -f /tmp/Dockerfile.dns /tmp 2>&1 | grep -E "nameserver|ubuntu.com|ERROR|error" | head
+          grep -h -E "^(deb|URIs)" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null | head -3
+          for n in archive.ubuntu.com azure.archive.ubuntu.com security.ubuntu.com github.com download.swift.org; do
+            echo "host $n: $(getent hosts $n | head -1)"
+          done
+          docker pull -q ubuntu:22.04 >/dev/null
+          for net in bridge host; do
+            for n in azure.archive.ubuntu.com github.com; do
+              echo "container($net) $n: $(docker run --rm --network $net ubuntu:22.04 getent hosts $n | head -1)"
+            done
+          done
